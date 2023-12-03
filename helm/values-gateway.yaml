@@ -1,0 +1,50 @@
+envvars:
+  CONFIG_SERVICE_PASSWORD: password
+  NOTIFICATION_SERVICE_PASSWORD: password
+  STATISTICS_SERVICE_PASSWORD: password
+  ACCOUNT_SERVICE_PASSWORD: password
+  MONGODB_PASSWORD: password
+
+statefulset:
+  enabled: false
+
+image:
+  repository: us-central1-docker.pkg.dev/devops-workshop-2023/piggymetrics/snapshots/gateway
+  pullPolicy: IfNotPresent
+replicaCount: 1
+
+
+service:
+  type: ClusterIP
+  port: 4000
+  targetport: 4000
+
+containers:
+  name: gateway
+
+imagePullSecrets: []
+nameOverride: "gateway"
+fullnameOverride: "gateway"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+securityContext: {}
+
+resources:
+  limits:
+    memory: 300Mi
+  requests:
+    cpu: 100m
+    memory: 100Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

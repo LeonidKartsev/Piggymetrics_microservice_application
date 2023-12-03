@@ -1,0 +1,65 @@
+{{- if .Values.statefulset.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+{{- else }}
+apiVersion: apps/v1
+kind: Deployment
+{{- end }}
+metadata:
+  name: {{ include "piggymetrics.fullname" . }}
+  labels: 
+    {{- include "piggymetrics.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels: 
+      {{- include "piggymetrics.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: 
+        {{- include "piggymetrics.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Values.containers.name }}
+        env:
+          {{- range $key, $val := .Values.envvars }}
+          - name: {{ $key }}
+            value: {{ $val }}
+          {{- end }}    
+        image: {{ .Values.image.repository }}  
+        ports:
+        - containerPort: {{ .Values.service.port }}
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+        volumeMounts:
+          - name:
+            {{- include "piggymetrics.labels" . | nindent 12 }} 
+            mountPath: /data/db
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.statefulset.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: {{ include "piggymetrics.fullname" . }}
+        labels:
+  {{- include "piggymetrics.labels" . | nindent 10 }}
+      spec:
+        accessModes: 
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.spec.storage }}
+        storageClassName: {{ .Values.spec.storageClassName }}
+  {{- end }}
+

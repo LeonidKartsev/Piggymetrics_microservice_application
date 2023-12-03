@@ -1,0 +1,50 @@
+envvars:
+  CONFIG_SERVICE_PASSWORD: password
+  NOTIFICATION_SERVICE_PASSWORD: password
+  STATISTICS_SERVICE_PASSWORD: password
+  ACCOUNT_SERVICE_PASSWORD: password
+  MONGODB_PASSWORD: password
+
+statefulset:
+  enabled: false
+
+image:
+  repository: us-central1-docker.pkg.dev/devops-workshop-2023/piggymetrics/snapshots/account-service
+  pullPolicy: IfNotPresent
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 6000
+  targetport: 6000
+
+containers:
+  name: account-service
+
+imagePullSecrets: []
+nameOverride: "accountservice"
+fullnameOverride: "account-service"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+securityContext: {}
+
+resources:
+  limits:
+    memory: 700Mi
+  requests:
+    cpu: 100m
+    memory: 100Mi
+
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

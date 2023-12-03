@@ -1,0 +1,55 @@
+envvars:
+  CONFIG_SERVICE_PASSWORD: password
+  NOTIFICATION_SERVICE_PASSWORD: password
+  STATISTICS_SERVICE_PASSWORD: password
+  ACCOUNT_SERVICE_PASSWORD: password
+  MONGODB_PASSWORD: password
+
+statefulset:
+  enabled: false
+
+image:
+  repository: us-central1-docker.pkg.dev/devops-workshop-2023/piggymetrics/snapshots/registry
+  pullPolicy: IfNotPresent
+replicaCount: 1
+metadata:
+  name: registry
+labels:
+  service: registry
+selector:
+  service: registry
+
+service:
+  type: ClusterIP
+  port: 8761
+  targetport: 8761
+
+containers:
+  name: registry
+
+imagePullSecrets: []
+nameOverride: "registry"
+fullnameOverride: "registry"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+securityContext: {}
+
+resources:
+  limits:
+    memory: 500Mi
+  requests:
+    cpu: 100m
+    memory: 100Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

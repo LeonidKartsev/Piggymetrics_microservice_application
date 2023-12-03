@@ -1,0 +1,55 @@
+envvars:
+  CONFIG_SERVICE_PASSWORD: password
+  NOTIFICATION_SERVICE_PASSWORD: password
+  STATISTICS_SERVICE_PASSWORD: password
+  ACCOUNT_SERVICE_PASSWORD: password
+  MONGODB_PASSWORD: password
+  
+statefulset:
+  enabled: false
+
+image:
+  repository: rabbitmq:3-management
+  pullPolicy: IfNotPresent
+replicaCount: 1
+metadata:
+  name: rabbitmq
+labels:
+  service: rabbitmq
+selector:
+  service: rabbitmq
+
+service:
+  type: ClusterIP
+  port: 15672
+  targetport: 15672
+
+containers:
+  name: rabbitmq
+  
+imagePullSecrets: []
+nameOverride: "rabbitmq"
+fullnameOverride: "rabbitmq"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+securityContext: {}
+
+resources: 
+  limits:
+    memory: 300Mi
+  requests:
+    cpu: 100m
+    memory: 100Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

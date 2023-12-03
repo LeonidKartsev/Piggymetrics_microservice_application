@@ -1,0 +1,186 @@
+stages:
+  - test
+  - build
+  - build_docker
+  - create_release_branch
+  - release
+  - branch
+
+.test_template:
+  stage: test
+  image: maven:3.9.4-eclipse-temurin-11-alpine
+  script:
+    - mvn test
+    - mvn clean package #test package
+
+.build_template:
+  stage: build
+  image: maven:3.9.4-eclipse-temurin-11-alpine
+  script:
+    - mvn test
+    - mvn versions:set -DnewVersion=$VERSION #add actual version to all pom-files
+
+.build_docker_template:
+  stage: build_docker
+  image: gcr.io/devops-workshop-2023/terraform-runner:1.0.1 #disable Google related commands
+  script:
+    - | #create artifact folder and add jar files to service folders
+      SERVICE_LIST=$(ls -d */ | sed 's#/##' | grep -Ev 'artifacts|mongodb')
+       for SERVICE in ${SERVICE_LIST}; do
+      mv artifacts/$SERVICE-*.jar $SERVICE
+       done
+    - $SERVICE_ACCOUNT_JSON | base64 -d > $CI_PROJECT_DIR/service-account.json #copy service account key.json
+    - gcloud auth activate-service-account "$SERVICE_ACCOUNT_NAME" --key-file=service-account.json #authorization in gcp #disable Google related commands
+    - gcloud artifacts repositories create piggymetrics --repository-format=docker --location=us-central1 || true #create artifact repo #disable Google related commands
+
+MR_test_job:
+  stage: test
+  extends: .test_template
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+Master_build_job:
+  stage: build
+  extends: .build_template
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+  after_script:
+    - mvn clean package #build jar files
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+  artifacts:
+    paths:
+      - artifacts/* #artifact folder
+
+Master_build_docker_job:
+  stage: build_docker
+  extends: .build_docker_template
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+    - sed 's/$VERSION'/$VERSION/g cloudbuild.yaml > cloudbuild_template.yaml #add version variable in the template cloudbuild file
+  script:
+    - | #change variables in the cloudbuild file using a template file and create service-images in artifact_registry/snapshots/artifact_name:tag #disable Google related commands
+      SERVICE_LIST=$(ls -d */ | sed 's#/##' | grep -v artifacts)
+      FOLDER=snapshots
+       for SERVICE in ${SERVICE_LIST}; do
+      sed "s/\$SERVICE/$SERVICE/g; s/\$FOLDER/$FOLDER\//g" cloudbuild_template.yaml > cloudbuild.yaml
+      gcloud builds submit --region=us-central1 --config=cloudbuild.yaml
+       done
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+  dependencies:
+    - Master_build_job
+
+Create_release_branch_job:
+  stage: create_release_branch
+  image: maven:3.9.4-eclipse-temurin-11-alpine
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+    - sed 's/$VERSION'/$VERSION/g cloudbuild.yaml > cloudbuild_template.yaml #add version variable in the template cloudbuild file
+  script:
+    - RELEASE_VERSION=$(echo $VERSION | sed 's/\-.*//')-release #"release version" variable in format 1.0.0-release
+    - apk add git
+    - git remote add https://gitlab.com/devops-workshop-2023/piggymetrics #authorization repo in git
+    - git checkout -b $RELEASE_VERSION #checkout to release branch
+    - git add *
+    - git commit -m "$RELEASE_VERSION"
+    - git push -f https://LeonidKartsev:$ACCESS_TOKEN@gitlab.com/devops-workshop-2023/piggymetrics.git HEAD:$RELEASE_VERSION
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE != "$(cat ci_commit_message.env)"
+  dependencies:
+    - Master_build_docker_job
+
+Push_release_artifacts_job:
+  stage: create_release_branch
+  extends: .build_docker_template
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+    - sed 's/$VERSION'/$VERSION/g cloudbuild.yaml > cloudbuild_template.yaml #add version variable in the template cloudbuild file
+  script:
+    - | #change variables in the cloudbuild file using a template file and create service-images in artifact registry/artifact_name:tag #disable Google related commands
+      SERVICE_LIST=$(ls -d */ | sed 's#/##' | grep -v artifacts)
+      FOLDER=
+       for SERVICE in ${SERVICE_LIST}; do
+      sed "s/\$SERVICE/$SERVICE/g; s/\$FOLDER/$FOLDER/g" cloudbuild_template.yaml > cloudbuild.yaml
+      gcloud builds submit --region=us-central1 --config=cloudbuild.yaml
+       done
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE != "$(cat ci_commit_message.env)"
+  dependencies:
+    - Create_release_branch_job
+
+Release_master_job:
+  stage: release
+  image: maven:3.9.4-eclipse-temurin-11-alpine
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+  script:
+    - apk add git
+    - git remote add https://gitlab.com/devops-workshop-2023/piggymetrics
+    - git checkout -b master #checkout to master
+    - | #script to update version for the next one
+      MAJOR_VERSION=$(echo $VERSION | cut -d '.' -f 1)
+      MINOR_VERSION=$(echo $VERSION | cut -d '.' -f 2)
+      PATCH_VERSION=$(echo $VERSION | cut -d '.' -f 3 | cut -c 1)
+       if [ "$MINOR_VERSION" -eq 9 ]; then
+      NEW_MAJOR_VERSION=$((MAJOR_VERSION + 1))
+      NEW_MINOR_VERSION=$MINOR_VERSION
+      NEW_PATCH_VERSION=$PATCH_VERSION
+       elif [ "$MAJOR_VERSION" -eq 9 ]; then
+      NEW_MAJOR_VERSION=$MAJOR_VERSION
+      NEW_MINOR_VERSION=$((MINOR_VERSION + 1))
+      NEW_PATCH_VERSION=$PATCH_VERSION
+       else
+      NEW_MAJOR_VERSION=$MAJOR_VERSION
+      NEW_MINOR_VERSION=$MINOR_VERSION
+      NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+       fi
+      VERSION="$NEW_MAJOR_VERSION.$NEW_MINOR_VERSION.$NEW_PATCH_VERSION-SNAPSHOT-$BUILD_TIMESTAMP-$CI_COMMIT_SHORT_SHA
+    - !reference [.build_template, script] #start ".build_template" script for update version in pom to 1.0.1
+    - VERSION=$(echo $VERSION | cut -d "-" -f 1)
+    - echo $VERSION-release > ci_commit_message.env #save commit message to .env file for use in "Create_release_branch_job" rules
+    - git add *
+    - git commit -m "$VERSION-release" # + commit message
+    - git push -f https://LeonidKartsev:$ACCESS_TOKEN@gitlab.com/devops-workshop-2023/piggymetrics.git HEAD:master
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+  dependencies:
+    - Create_release_branch_job
+
+Branch_build_job:
+  stage: branch
+  extends: .build_template
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+  script:
+    - mvn clean package #build jar files 1.0.0
+  rules:
+    - if: $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_NAME !~ ".*-release"
+      when: manual
+
+Branch_build_docker_job:
+  stage: branch
+  extends: .build_docker_template
+  before_script:
+    - BUILD_TIMESTAMP=$(date +"%Y-%m-%d-%H.%M") #timestamp in "2000-01-01-12.00" format
+    - VERSION=$(awk -F'[><]' '/<version>.*-SNAPSHOT<\/version>/{print $3 "-'$BUILD_TIMESTAMP'-'$CI_COMMIT_SHORT_SHA'"}' "./pom.xml") #"version" variable
+    - sed 's/$VERSION'/$VERSION/g cloudbuild.yaml > cloudbuild_template.yaml #add version variable in the template cloudbuild file
+  script:
+    - | #change variables in the cloudbuild file using a template file and create service-images in artifact registry/$branch_name/artifact_name:tag #disable Google related commands
+      SERVICE_LIST=$(ls -d */ | sed 's#/##' | grep -v artifacts)
+      FOLDER=$CI_COMMIT_BRANCH
+       for SERVICE in ${SERVICE_LIST}; do
+      sed "s/\$SERVICE/$SERVICE/g; s/\$FOLDER/$FOLDER\//g" cloudbuild_template.yaml > cloudbuild.yaml
+      gcloud builds submit --region=us-central1 --config=cloudbuild.yaml
+       done
+  rules:
+    - if: $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_NAME !~ ".*-release"
+      when: manual
+  dependencies:
+    - Branch_build_job
